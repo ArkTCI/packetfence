@@ -1,0 +1,59 @@
+name: Build and Deploy PacketFence
+
+on:
+  push:
+    branches:
+      - main
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: read  # This is required for actions/checkout
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout the repository code
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-region: us-east-1
+          role-to-assume: arn:aws:iam::839046125351:role/GithubActionRole-ECRPushRole
+          role-session-name: ECR_ClassesSync_Push
+          role-duration-seconds: 900
+      # Log in to Amazon ECR
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+        with:
+          mask-password: true
+
+      # Build and push Docker images for all containers
+      - name: Build and Push Docker Images
+        run: |
+          # Navigate to containers directory
+          cd containers
+          
+          # Loop through all container directories and build/push images
+          for dir in */; do
+            service=$(basename "$dir")
+            docker build -t $service ./$service
+            docker tag $service:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY_NAME }}/$service:latest
+            docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY_NAME }}/$service:latest
+          done
+
+      # Deploy to AWS ECS Fargate
+    #  - name: Deploy to ECS
+    #    uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+    #    with:
+    #      cluster: packetfence-cluster
+    #      service: packetfence-service
+    #      task-definition: ecs-task-def.json
+    #      wait-for-service-stability: true
+
+  # Environment variables for connecting RDS database to containers
+  #env:
+  #  DATABASE_URL: "postgres://${{ secrets.RDS_DB_USER }}:${{ secrets.RDS_DB_PASSWORD }}@${{ secrets.RDS_DB_HOST }}:5432/packetfence"
