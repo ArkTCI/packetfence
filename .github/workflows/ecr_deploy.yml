@@ -32,18 +32,48 @@ jobs:
 
       # Build and push Docker images for all containers
       - name: Build and Push Docker Images
+        env:
+          DOCKFILE_VARS: "PF_VERSION IMAGE_TAG FINGERBANK_BUILD_API_KEY BUILD_PFAPPSERVER_VUE"
+          PF_VERSION: $(egrep -o '[0-9]+\.[0-9]+' conf/pf-release)  # Extract version from pf-release
+          IMAGE_TAG: "latest"
+          FINGERBANK_BUILD_API_KEY: ${{ secrets.FINGERBANK_BUILD_API_KEY }}
+          BUILD_PFAPPSERVER_VUE: "true"
         run: |
-          # Navigate to containers directory
+          generate_build_args() {
+              local build_args=''
+              if [ -n "${DOCKFILE_VARS}" ]; then
+                  for var in ${DOCKFILE_VARS}; do
+                      # Handle case of first iteration
+                      if [ -z "$build_args" ]; then
+                          build_args="--build-arg ${var}"
+                      else
+                          build_args="$build_args --build-arg ${var}"
+                      fi
+                  done
+                  echo "$build_args"
+              fi
+          }
+
+          # Navigate to containers directory and build images using Docker
           cd containers
-          
+
           # Loop through all container directories and build/push images
           for dir in */; do
             service=$(basename "$dir")
-            docker build -t $service ./$service
-            docker tag $service:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY_NAME }}/$service:latest
-            docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY_NAME }}/$service:latest
-          done
 
+            # Build Docker image with version tagging
+            docker build -t $service ./$service $(generate_build_args)
+
+            # Tag the image with 'latest'
+            docker tag $service:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY_NAME }}/$service:latest
+
+            # Tag the image with the version (PF_VERSION)
+            docker tag $service:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY_NAME }}/$service:${PF_VERSION}
+
+            # Push both 'latest' and version tags
+            docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY_NAME }}/$service:latest
+            docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY_NAME }}/$service:${PF_VERSION}
+          done
       # Deploy to AWS ECS Fargate
     #  - name: Deploy to ECS
     #    uses: aws-actions/amazon-ecs-deploy-task-definition@v1
